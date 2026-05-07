@@ -25,6 +25,14 @@ services:
       - REDIS_URL=redis
       - REDIS_PORT=6379
 
+  gateway:
+    build: ./gateway
+    ports:
+      - "9000:8000"
+    depends_on:
+      - inventory
+      - payment
+
   redis:
     image: redis:7
     command: ["redis-server", "--requirepass", "GGWCEQ4FncKvWWYpjWZSJs5d5uGUxdXw"]
