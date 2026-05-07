@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+
+  inventory:
+    build: ./inventory
+    container_name: inventory
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis
+      - REDIS_PORT=6379
+
+  payment:
+    build: ./payments
+    container_name: payment
+    ports:
+      - "8001:8000"
+    depends_on:
+      - redis
+      - inventory
+    environment:
+      - REDIS_URL=redis
+      - REDIS_PORT=6379
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--requirepass", "GGWCEQ4FncKvWWYpjWZSJs5d5uGUxdXw"]
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  payment_consumer:
+    build: ./payments
+    command: ["python", "consumer.py"]
+    depends_on:
+      - redis
+
+  inventory_consumer:
+    build: ./inventory
+    command: ["python", "consumer.py"]
+    depends_on:
+      - redis
