@@ -146,7 +146,6 @@ uvicorn main:app --reload --port 8000
 
 - **Host:** redis (from docker-compose)
 - **Port:** 6379
-- **Password:** GGWCEQ4FncKvWWYpjWZSJs5d5uGUxdXw
 
 Environment variables (set in docker-compose.yml):
 - `REDIS_URL` - Redis host
