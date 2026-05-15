@@ -1,1 +1,6 @@
 .env
+*.env
+inventory/.env
+payments/.env
+auth/.env
+__pycache__/
