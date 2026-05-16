@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from redis_client import Order,redis
+from redis_om.model.model import NotFoundError
 import requests, time
 from fastapi.background import BackgroundTasks
 
@@ -32,13 +33,26 @@ def format(pk:str):
 
 @app.get("/orders/{pk}")
 def get_order(pk: str):
-    order = Order.get(pk)
-    return order
+    try:
+        order = Order.get(pk)
+        return order
+    
+    except NotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found"
+        )
 
 @app.delete("/delete_orders/{pk}")
 def delete_order(pk: str):
-    order =Order.get(pk)
-    order.delete()
+    try:
+        order =Order.get(pk)
+        order.delete()
+    except NotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found"
+        )
     return {"message":"Order deleted successfully"}
 
 @app.post("/orders")
