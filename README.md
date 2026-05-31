@@ -1,29 +1,60 @@
 # Microservices Project
 
-A distributed microservices architecture built with FastAPI, Redis, and Docker. This project demonstrates inter-service communication, asynchronous message processing, and containerized deployment.
+A distributed microservices architecture built with FastAPI, Redis, PostgreSQL, and Docker. This project demonstrates secure API gateway routing, JWT-based authentication, asynchronous message processing with Redis streams, and containerized deployment.
 
 ## 📋 Project Overview
 
-This project consists of two main microservices:
+This project includes four main components:
 
-1. **Inventory Service** - Manages product catalog and inventory
-2. **Payments Service** - Manages orders and payment processing
+1. **Auth Service** - User registration, login, and JWT token issuance
+2. **Gateway Service** - API gateway with token validation and request forwarding
+3. **Inventory Service** - Product catalog, inventory management, and refund event publishing
+4. **Payments Service** - Order creation, payment processing, and refund handling
 
-Both services communicate asynchronously through Redis and expose REST APIs for client interaction.
+Supporting components:
+- **Redis** for object storage and event streams
+- **PostgreSQL** for auth database persistence
+- **Background consumers** for async inventory and refund processing
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐        ┌──────────────────┐        ┌─────────┐
-│  Inventory API  │───────▶│  Payments API    │───────▶│  Redis  │
-│  (Port 8000)    │        │  (Port 8001)     │        │ Queue   │
-└─────────────────┘        └──────────────────┘        └─────────┘
-        │                          │                         │
-        ▼                          ▼                         ▼
-┌─────────────────┐        ┌──────────────────┐        ┌─────────┐
-│ Inventory       │        │ Payments         │        │ Refund  │
-│ Consumer        │        │ Consumer         │        │ Events  │
-└─────────────────┘        └──────────────────┘        └─────────┘
+                ┌────────────┐
+                │  Auth API  │
+                │  (8003)    │
+                └──────┬─────┘
+                       │
+                       ▼
+┌──────────┐   ┌──────────────────────┐   ┌─────────────┐
+│ Client   │──▶│ Gateway API (9000)   │──▶│ Inventory   │
+│          │   │                      │   │ Service     │
+└──────────┘   │                      │   │ (8005)      │
+               │                      │   └─────────────┘
+               │                      │
+               │                      │   ┌─────────────┐
+               │                      │──▶│ Payments    │
+               │                      │   │ Service     │
+               │                      │   │ (8001)      │
+               │                      │   └─────────────┘
+               │                      │
+               │                      │   ┌─────────────┐
+               │                      │   │ Redis       │
+               │                      │   │ (6379)      │
+               │                      │   └─────────────┘
+               │
+               │                      ┌─────────────┐
+               │                      │ Inventory   │
+               │                      │ Consumer    │
+               │                      └─────────────┘
+               │                      ┌─────────────┐
+               │                      │ Payments    │
+               │                      │ Consumer    │
+               │                      └─────────────┘
+               ▼
+          ┌────────────┐
+          │ PostgreSQL │
+          │ auth_db    │
+          └────────────┘
 ```
 
 ## 🚀 Quick Start
@@ -34,170 +65,229 @@ Both services communicate asynchronously through Redis and expose REST APIs for 
 - Docker Compose
 - Python 3.9+ (for local development)
 
-### Installation & Running
+### Run with Docker Compose
 
-1. Clone the repository:
+1. Change into the project directory:
+
 ```bash
 cd microservices2
 ```
 
-2. Build and run all services with Docker Compose:
+2. Build and start all services:
+
 ```bash
 docker-compose up --build
 ```
 
-This will start:
-- **Inventory Service** on `http://localhost:8000`
-- **Payments Service** on `http://localhost:8001`
-- **Redis** on `localhost:6379`
-- **Background Consumers** for processing async events
+The application stack will start on these host ports:
 
-3. Verify services are running:
+- **Gateway:** `http://localhost:9000`
+- **Inventory Service:** `http://localhost:8005`
+- **Payments Service:** `http://localhost:8001`
+- **Auth Service:** `http://localhost:8003`
+- **Redis:** `http://localhost:6379`
+- **PostgreSQL:** `http://localhost:5433`
+
+3. Verify service availability:
+
 ```bash
-curl http://localhost:8000/products
-curl http://localhost:8001/orders
+curl http://localhost:9000/auth/register
+curl http://localhost:9000/inventory/products
+curl http://localhost:9000/payments/orders
 ```
 
 ## 📦 Services
 
-### Inventory Service
+### Auth Service
 
-**Port:** 8000
+**Port:** `8003`
+
+**Features:**
+- User registration with hashed passwords
+- User login with JWT access token issuance
+- PostgreSQL persistence for user accounts
 
 **Endpoints:**
+- `POST /register` - Register a new user
+- `POST /login` - Authenticate and receive JWT token
 
-- `GET /products` - Get all products
+### Gateway Service
+
+**Port:** `9000`
+
+**Features:**
+- Central routing for inventory, payments, and auth requests
+- JWT validation for inventory and payment API calls
+- Transparent proxying of request body and headers
+
+**Routes:**
+- `POST /auth/{path}` → forwards auth requests to Auth Service
+- `GET/POST/DELETE /inventory/{path}` → forwards to Inventory Service
+- `GET/POST/DELETE /payments/{path}` → forwards to Payments Service
+
+### Inventory Service
+
+**Host Port:** `8005`
+
+**Features:**
+- Product create/read/delete operations
+- Uses Redis OM for product modeling
+- Publishes `refund_order` events when a product is deleted
+- CORS enabled for frontend integration
+
+**Endpoints:**
+- `GET /products` - List all products
+- `GET /get_products/{pk}` - Get product details by ID
 - `POST /create_products` - Create a new product
-- `GET /get_products/{pk}` - Get product by ID
-- `DELETE /delete_products/{pk}` - Delete a product (triggers refund event)
-
-**Technologies:** FastAPI, Redis-OM, Redis
+- `DELETE /delete_products/{pk}` - Delete a product and emit refund event
 
 ### Payments Service
 
-**Port:** 8001
+**Host Port:** `8001`
+
+**Features:**
+- Order creation with inventory validation
+- Automatic fee and total calculation
+- Background async status updates for orders
+- Publishes `order_completed` and `refund_order` events
+- Uses Redis OM for order storage
+- CORS enabled for frontend integration
 
 **Endpoints:**
-
-- `GET /orders` - Get all orders
-- `GET /orders/{pk}` - Get order by ID
-- `POST /orders` - Create a new order
+- `GET /orders` - List all orders
+- `GET /orders/{pk}` - Get an order by ID
+- `POST /orders` - Create an order
 - `DELETE /delete_orders/{pk}` - Delete an order
 
-**Technologies:** FastAPI, Redis-OM, Redis, Background Tasks
+### Async Consumers
 
-## 🔄 Message Flow
+Two background workers process Redis streams:
 
-1. **Order Creation Flow:**
-   - Client sends order request to Payments API
-   - Payments service queries Inventory service for product details
-   - Order is created and stored in Redis
-   - Payment consumer processes the order asynchronously
+- `inventory_consumer` consumes `order_completed` events and decrements inventory quantities
+- `payment_consumer` consumes `refund_order` events and sets related pending orders to `refunded`
 
-2. **Refund Flow:**
-   - When a product is deleted from Inventory, a refund event is published
-   - Event is placed on the `refund-order` Redis stream
-   - Payment consumer listens and processes refund events
+## 🔄 Workflow
 
-## 🛠️ Development
+### Order Lifecycle
 
-### Project Structure
+1. Client requests order creation through Gateway.
+2. Payments Service fetches product details from Inventory Service.
+3. Order is saved with `pending` status in Redis.
+4. Background task waits and updates order status to `completed` or `refunded`.
+5. A Redis stream event is published for downstream services.
+
+### Refund Processing
+
+- When a product is deleted, Inventory Service publishes a `refund_order` event.
+- Payment consumer listens on the `refund_order` stream.
+- Pending orders for the deleted product are marked as `refunded`.
+- Inventory consumer also uses `order_completed` events to adjust stock levels.
+
+## 🛠️ Project Structure
 
 ```
 microservices2/
-├── docker-compose.yml         # Service orchestration
-├── inventory/                 # Inventory microservice
-│   ├── main.py               # FastAPI application
-│   ├── consumer.py           # Async message consumer
-│   ├── redis_client.py       # Redis client & models
-│   ├── dockerfile            # Container image
-│   └── requirements.txt       # Python dependencies
-├── payments/                  # Payments microservice
-│   ├── main.py               # FastAPI application
-│   ├── consumer.py           # Async message consumer
-│   ├── redis_client.py       # Redis client & models
-│   ├── dockerfile            # Container image
-│   └── requirements.txt       # Python dependencies
-└── README.md                 # This file
+├── auth/                     # Authentication microservice
+│   ├── auth.py               # JWT helpers
+│   ├── database.py           # SQLAlchemy PostgreSQL setup
+│   ├── dockerfile            # Auth container image
+│   ├── main.py               # FastAPI auth app
+│   ├── models.py             # SQLAlchemy user model
+│   ├── requirements.txt      # Auth dependencies
+│   └── schemas.py            # Pydantic request/response schemas
+├── gateway/                  # API gateway microservice
+│   ├── dockerfile            # Gateway container image
+│   └── main.py               # FastAPI proxy app
+├── inventory/                # Inventory microservice
+│   ├── consumer.py           # Redis stream consumer
+│   ├── dockerfile            # Inventory container image
+│   ├── main.py               # FastAPI inventory app
+│   ├── redis_client.py       # Redis OM connection and product model
+│   └── requirements.txt      # Inventory dependencies
+├── payments/                 # Payments microservice
+│   ├── consumer.py           # Refund stream consumer
+│   ├── dockerfile            # Payments container image
+│   ├── main.py               # FastAPI payments app
+│   ├── redis_client.py       # Redis OM connection and order model
+│   ├── requirements.txt      # Payments dependencies
+│   └── schemas.py            # Pydantic order schemas
+├── docker-compose.yml        # Multi-container orchestration
+└── README.md                 # Project documentation
 ```
 
-### Local Development
+## 🔧 Configuration
 
-1. Create a virtual environment:
-```bash
-python -m venv venv
-source venv/Scripts/activate  # On Windows: venv\Scripts\activate
-```
+### Environment Variables
 
-2. Install dependencies:
-```bash
-cd inventory
-pip install -r requirements.txt
-```
+The services use the following environment values in `docker-compose.yml` and `auth/.env`:
 
-3. Run a service locally:
-```bash
-uvicorn main:app --reload --port 8000
-```
-
-## 🔐 Configuration
-
-### Redis Connection
-
-- **Host:** redis (from docker-compose)
-- **Port:** 6379
-
-Environment variables (set in docker-compose.yml):
-- `REDIS_URL` - Redis host
+- `REDIS_URL` - Redis hostname
 - `REDIS_PORT` - Redis port
+- `REDIS_PASSWORD` - Redis password for Redis server
+- `POSTGRES_USER` - PostgreSQL username
+- `POSTGRES_PASSWORD` - PostgreSQL password
+- `POSTGRES_DB` - PostgreSQL database name
+- `SECRET_KEY` - JWT signing secret
+- `ALGORITHM` - JWT signing algorithm
 
-### CORS Configuration
+### Internal Service URLs
 
-Services allow requests from `http://localhost:3000` for frontend integration.
+Internal container addresses used by services:
 
-## 📝 Dependencies
+- `http://inventory:8000`
+- `http://payment:8000`
+- `http://auth:8000`
 
-- **fastapi** - Web framework
-- **uvicorn** - ASGI server
-- **redis-om** - Redis object mapping
-- **python-dotenv** - Environment variables
-- **requests** - HTTP client for inter-service communication
+## 🧪 Example Requests
 
-## 🧪 Testing
+### Auth
 
-Test inventory endpoints:
 ```bash
-# Get all products
-curl http://localhost:8000/products
-
-# Create a product
-curl -X POST http://localhost:8000/create_products \
+curl -X POST http://localhost:9000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"name":"Product1","price":99.99,"quantity":10}'
+  -d '{"username":"user1","email":"user1@example.com","password":"secret"}'
 
-# Get product by ID
-curl http://localhost:8000/get_products/{id}
+curl -X POST http://localhost:9000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user1@example.com","password":"secret"}'
 ```
 
-Test payment endpoints:
-```bash
-# Get all orders
-curl http://localhost:8001/orders
+### Inventory via Gateway
 
-# Create an order
-curl -X POST http://localhost:8001/orders \
-  -H "Content-Type: application/json" \
-  -d '{"id":"product-id"}'
+```bash
+curl -H "Authorization: Bearer <token>" http://localhost:9000/inventory/products
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"name":"Widget","price":25.50,"quantity":50}' \
+  http://localhost:9000/inventory/create_products
+```
+
+### Payments via Gateway
+
+```bash
+curl -H "Authorization: Bearer <token>" http://localhost:9000/payments/orders
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"id":"<product-id>","quantity":2}' \
+  http://localhost:9000/payments/orders
 ```
 
 ## 🐛 Troubleshooting
 
-**Services won't start:**
-- Ensure Docker and Docker Compose are installed
-- Check port availability (8000, 8001, 6379)
-- View logs: `docker-compose logs`
+- Ensure Docker and Docker Compose are installed and running
+- Confirm required ports are free: `8005`, `8001`, `9000`, `8003`, `6379`, `5433`
+- Verify container startup logs:
+  - `docker-compose logs gateway`
+  - `docker-compose logs inventory`
+  - `docker-compose logs payment`
+  - `docker-compose logs auth`
+- Check Redis authentication and PostgreSQL credentials in `.env`
 
-**Redis connection issues:**
+## 📚 References
+
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [Redis Documentation](https://redis.io/documentation)
+- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
+- [Docker Compose Documentation](https://docs.docker.com/compose/)
+
 - Verify Redis service is running: `docker-compose ps`
 - Check Redis credentials in docker-compose.yml
 - Ensure containers can communicate: `docker-compose logs redis`
