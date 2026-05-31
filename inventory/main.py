@@ -2,6 +2,7 @@ from fastapi import FastAPI,HTTPException
 #from redis.exceptions import NotFoundError
 from fastapi.middleware.cors import CORSMiddleware
 from redis_client import redis, Product
+from redis_om.model.model import NotFoundError
 app = FastAPI()
 
 app.add_middleware(
@@ -15,7 +16,10 @@ app.add_middleware(
 
 @app.get("/products")
 def get_products():
-    return [format(pk) for pk in Product.all_pks()]
+    try:
+        return [format(pk) for pk in Product.all_pks()]
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="No products available in inventory") 
 
 def format(pk: str):
     product = Product.get(pk)
@@ -32,19 +36,23 @@ def create_products(products: Product):
 
 @app.delete("/delete_products/{pk}")
 def delete_product(pk: str):
-    product = Product.get(pk)
+    try:
+        product = Product.get(pk)
+    
+        # Emit refund event
+        redis.xadd("refund_order", product.dict(), "*")
 
-    # Emit refund event
-    redis.xadd("refund-order", product.dict(), "*")
+        Product.delete(pk)
 
-    Product.delete(pk)
-
-    return {"message": "Product deleted"}
+        return {"message": "Product deleted"}
+    except NotFoundError:
+        raise HTTPException(status_code = 404,
+                            detail = "Product is not available")
 
 @app.get("/get_products/{pk}")
 def get_product(pk: str):
     try:
         return Product.get(pk)
-    except Exception as e:
+    except NotFoundError:
         raise HTTPException(status_code=404, detail="Product not found")
    

@@ -1,10 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.requests import Request
+#from starlette.requests import Request
 from redis_client import Order,redis
 from redis_om.model.model import NotFoundError
-import requests, time
+import requests, time, httpx, asyncio
 from fastapi.background import BackgroundTasks
+from schemas import OrderCreate
 
 app = FastAPI()
 
@@ -17,8 +18,10 @@ app.add_middleware(
 
 @app.get("/orders")
 def get_orders():
-    return [format(order) for order in Order.all_pks()]
-
+    
+        all_orders = [format(order) for order in Order.all_pks()]
+        return all_orders
+        
 def format(pk:str):
     order = Order.get(pk)
     return {
@@ -48,19 +51,31 @@ def delete_order(pk: str):
     try:
         order =Order.get(pk)
         order.delete()
+        return {"message":"Order deleted successfully"}
     except NotFoundError:
         raise HTTPException(
             status_code=404,
             detail="Order not found"
         )
-    return {"message":"Order deleted successfully"}
+    
 
 @app.post("/orders")
-async def create_order(request: Request, background_tasks: BackgroundTasks):
-    body = await request.json()
+async def create_order(order_data: OrderCreate, background_tasks: BackgroundTasks):
+    body = order_data.model_dump()
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.get(
+            f"http://inventory:8000/get_products/{body['id']}"
+            )
 
-    product = requests.get("http://inventory:8000/get_products/%s" % body["id"]).json()
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code = 404,
+            detail = "Product not found in inventory"
+        )
 
+    product = response.json()
+
+    
     order = Order(
         product_id = body["id"],
         price = product["price"],
@@ -83,20 +98,21 @@ def update_order_status(order: Order):
     order.status = "completed"
     order.save()
     redis.xadd("order_completed", order.dict(), "*")"""
-def update_order_status(order: Order):
+async def update_order_status(order: Order):
     try:
-        time.sleep(5)
+        await asyncio.sleep(5)
 
         order = Order.get(order.pk)  # reload latest state
 
         if order.status != "pending":
             return  # already refunded → don't override
-
-        response = requests.get(f"http://inventory:8000/get_products/{order.product_id}")
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"http://inventory:8000/get_products/{order.product_id}")
 
         if response.status_code != 200:
             order.status = "refunded"
-            redis.xadd('order_refunded', order.dict(), '*')
+            redis.xadd('refund_order', order.dict(), '*')
         else:
             order.status = "completed"
             redis.xadd('order_completed', order.dict(), '*')

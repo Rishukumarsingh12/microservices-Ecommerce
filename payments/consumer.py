@@ -1,12 +1,12 @@
 from redis_client import redis, Order
 import time
 
-key = "refund-order"
+key = "refund_order"
 group = "payment-group"
 
 try:
-    redis.xgroup_create(key, group)
-except:
+    redis.xgroup_create(key, group, id="0", mkstream=True)
+except Exception:
     print("Group already exists")
 while True:
     try:
@@ -25,10 +25,9 @@ while True:
                         order.status = "refunded"
                         order.save()
                         print("REFUNDED:", order.dict())
-
-               
+                redis.xack(key, group, message_id)
 
     except Exception as e:
-        print(str(e))
+        print(f"Refund processing error: {str(e)}")
 
     time.sleep(1)
